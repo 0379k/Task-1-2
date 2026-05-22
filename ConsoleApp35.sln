@@ -1,25 +1,420 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.14.36221.1 d17.14
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConsoleApp35", "ConsoleApp35\ConsoleApp35.csproj", "{82CF82AB-614B-41F8-BDE6-D19645781C12}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
-		Release|Any CPU = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{82CF82AB-614B-41F8-BDE6-D19645781C12}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{82CF82AB-614B-41F8-BDE6-D19645781C12}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{82CF82AB-614B-41F8-BDE6-D19645781C12}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{82CF82AB-614B-41F8-BDE6-D19645781C12}.Release|Any CPU.Build.0 = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {014E0534-4560-43E8-A2F1-9B65EBFA96CC}
-	EndGlobalSection
-EndGlobal
+using System.Text.Json;
+
+namespace DictionariesApp;
+
+class Program
+{
+    // Путь к папке со словарями
+    static readonly string DataFolder = "Data";
+
+    // Текущий словарь (название, тип, список слов и переводов)
+    static string currentDictName = "";
+    static string currentDictType = "";
+    static Dictionary<string, List<string>> currentWords = new(); // слово -> список переводов
+
+    static void Main()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        // Создаём папку для словарей
+        if (!Directory.Exists(DataFolder))
+            Directory.CreateDirectory(DataFolder);
+
+        while (true)
+        {
+            if (string.IsNullOrEmpty(currentDictName))
+                ShowMainMenu();
+            else
+                ShowDictionaryMenu();
+        }
+    }
+
+    //МЕНЮ
+
+    static void ShowMainMenu()
+    {
+        Console.Clear();
+        Console.WriteLine("=== СЛОВАРИ ===\n");
+        Console.WriteLine("1. Выбрать словарь");
+        Console.WriteLine("2. Создать новый словарь");
+        Console.WriteLine("3. Выход");
+        Console.Write("\nВыбор: ");
+
+        string choice = Console.ReadLine() ?? "";
+
+        switch (choice)
+        {
+            case "1": SelectDictionary(); break;
+            case "2": CreateDictionary(); break;
+            case "3": Environment.Exit(0); break;
+            default: WaitAndContinue("Неверный ввод"); break;
+        }
+    }
+
+    static void ShowDictionaryMenu()
+    {
+        Console.Clear();
+        Console.WriteLine($"=== {currentDictName} ({currentDictType}) ===\n");
+        Console.WriteLine("1. Добавить слово и перевод");
+        Console.WriteLine("2. Заменить слово");
+        Console.WriteLine("3. Заменить перевод");
+        Console.WriteLine("4. Удалить слово");
+        Console.WriteLine("5. Удалить перевод");
+        Console.WriteLine("6. Найти перевод");
+        Console.WriteLine("7. Экспорт слова в файл");
+        Console.WriteLine("8. Закрыть словарь (назад)");
+        Console.WriteLine("9. Выход");
+        Console.Write("\nВыбор: ");
+
+        string choice = Console.ReadLine() ?? "";
+
+        switch (choice)
+        {
+            case "1": AddWord(); break;
+            case "2": ReplaceWord(); break;
+            case "3": ReplaceTranslation(); break;
+            case "4": DeleteWord(); break;
+            case "5": DeleteTranslation(); break;
+            case "6": FindWord(); break;
+            case "7": ExportWord(); break;
+            case "8": CloseDictionary(); break;
+            case "9": Environment.Exit(0); break;
+            default: WaitAndContinue("Неверный ввод"); break;
+        }
+    }
+
+    //РАБОТА СО СЛОВАРЯМИ
+
+    static void SelectDictionary()
+    {
+        var dicts = GetAllDictionaries();
+        if (dicts.Count == 0)
+        {
+            WaitAndContinue("Нет словарей. Сначала создайте!");
+            return;
+        }
+
+        Console.Clear();
+        Console.WriteLine("=== ДОСТУПНЫЕ СЛОВАРИ ===\n");
+        for (int i = 0; i < dicts.Count; i++)
+            Console.WriteLine($"{i + 1}. {dicts[i]}");
+        Console.Write("\nВыберите номер: ");
+
+        if (int.TryParse(Console.ReadLine(), out int idx) && idx >= 1 && idx <= dicts.Count)
+            LoadDictionary(dicts[idx - 1]);
+        else
+            WaitAndContinue("Неверный выбор");
+    }
+
+    static void CreateDictionary()
+    {
+        Console.Clear();
+        Console.WriteLine("=== НОВЫЙ СЛОВАРЬ ===\n");
+        Console.Write("Название: ");
+        string name = Console.ReadLine() ?? "";
+        Console.Write("Тип (например, англо-русский): ");
+        string type = Console.ReadLine() ?? "";
+
+        string filePath = GetFilePath(name);
+        if (File.Exists(filePath))
+        {
+            WaitAndContinue("Словарь уже существует");
+            return;
+        }
+
+        // Сохраняем пустой словарь
+        var emptyDict = new Dictionary<string, List<string>>();
+        SaveDictionaryToFile(name, type, emptyDict);
+
+        currentDictName = name;
+        currentDictType = type;
+        currentWords = emptyDict;
+
+        Console.WriteLine($"Словарь '{name}' создан!");
+        WaitAndContinue();
+    }
+
+    static void LoadDictionary(string name)
+    {
+        string filePath = GetFilePath(name);
+        if (!File.Exists(filePath))
+        {
+            WaitAndContinue("Словарь не найден");
+            return;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(filePath);
+            var data = JsonSerializer.Deserialize<DictionaryData>(json);
+
+            currentDictName = name;
+            currentDictType = data.Type;
+            currentWords = data.Words ?? new Dictionary<string, List<string>>();
+        }
+        catch
+        {
+            WaitAndContinue("Ошибка загрузки словаря");
+        }
+    }
+
+    static void SaveCurrentDictionary()
+    {
+        SaveDictionaryToFile(currentDictName, currentDictType, currentWords);
+    }
+
+    static void SaveDictionaryToFile(string name, string type, Dictionary<string, List<string>> words)
+    {
+        var data = new DictionaryData { Type = type, Words = words };
+        string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(GetFilePath(name), json);
+    }
+
+    static List<string> GetAllDictionaries()
+    {
+        var names = new List<string>();
+        foreach (string file in Directory.GetFiles(DataFolder, "*.json"))
+        {
+            string name = Path.GetFileNameWithoutExtension(file);
+            names.Add(name);
+        }
+        return names;
+    }
+
+    static string GetFilePath(string dictName) =>
+        Path.Combine(DataFolder, dictName + ".json");
+
+    static void CloseDictionary()
+    {
+        currentDictName = "";
+        currentDictType = "";
+        currentWords.Clear();
+    }
+
+    //РАБОТА СО СЛОВАМИ
+
+    static void AddWord()
+    {
+        Console.Clear();
+        Console.Write("Слово: ");
+        string word = Console.ReadLine() ?? "";
+
+        if (string.IsNullOrWhiteSpace(word))
+        {
+            WaitAndContinue("Слово не может быть пустым");
+            return;
+        }
+
+        var translations = new List<string>();
+        Console.WriteLine("Введите переводы (пустая строка - закончить):");
+
+        while (true)
+        {
+            Console.Write("Перевод: ");
+            string trans = Console.ReadLine() ?? "";
+            if (string.IsNullOrWhiteSpace(trans)) break;
+            translations.Add(trans);
+        }
+
+        if (translations.Count == 0)
+        {
+            WaitAndContinue("Не добавлено ни одного перевода");
+            return;
+        }
+
+        // Если слово уже есть - добавляем переводы
+        if (currentWords.ContainsKey(word))
+        {
+            foreach (string t in translations)
+                if (!currentWords[word].Contains(t))
+                    currentWords[word].Add(t);
+        }
+        else
+        {
+            currentWords[word] = translations;
+        }
+
+        SaveCurrentDictionary();
+        Console.WriteLine($"Слово '{word}' добавлено/обновлено");
+        WaitAndContinue();
+    }
+
+    static void ReplaceWord()
+    {
+        Console.Clear();
+        Console.Write("Какое слово заменить? ");
+        string oldWord = Console.ReadLine() ?? "";
+
+        if (!currentWords.ContainsKey(oldWord))
+        {
+            WaitAndContinue("Слово не найдено");
+            return;
+        }
+
+        Console.Write("Новое слово: ");
+        string newWord = Console.ReadLine() ?? "";
+
+        if (currentWords.ContainsKey(newWord))
+        {
+            WaitAndContinue("Слово с таким именем уже существует");
+            return;
+        }
+
+        var translations = currentWords[oldWord];
+        currentWords.Remove(oldWord);
+        currentWords[newWord] = translations;
+        SaveCurrentDictionary();
+
+        Console.WriteLine($"'{oldWord}' заменён на '{newWord}'");
+        WaitAndContinue();
+    }
+
+    static void ReplaceTranslation()
+    {
+        Console.Clear();
+        Console.Write("Слово: ");
+        string word = Console.ReadLine() ?? "";
+
+        if (!currentWords.ContainsKey(word))
+        {
+            WaitAndContinue("Слово не найдено");
+            return;
+        }
+
+        Console.Write("Какой перевод заменить? ");
+        string oldTrans = Console.ReadLine() ?? "";
+
+        if (!currentWords[word].Contains(oldTrans))
+        {
+            WaitAndContinue("Перевод не найден");
+            return;
+        }
+
+        Console.Write("Новый перевод: ");
+        string newTrans = Console.ReadLine() ?? "";
+
+        int index = currentWords[word].IndexOf(oldTrans);
+        currentWords[word][index] = newTrans;
+        SaveCurrentDictionary();
+
+        Console.WriteLine("Перевод заменён");
+        WaitAndContinue();
+    }
+
+    static void DeleteWord()
+    {
+        Console.Clear();
+        Console.Write("Какое слово удалить? ");
+        string word = Console.ReadLine() ?? "";
+
+        if (!currentWords.ContainsKey(word))
+        {
+            WaitAndContinue("Слово не найдено");
+            return;
+        }
+
+        currentWords.Remove(word);
+        SaveCurrentDictionary();
+
+        Console.WriteLine($"Слово '{word}' удалено вместе со всеми переводами");
+        WaitAndContinue();
+    }
+
+    static void DeleteTranslation()
+    {
+        Console.Clear();
+        Console.Write("Слово: ");
+        string word = Console.ReadLine() ?? "";
+
+        if (!currentWords.ContainsKey(word))
+        {
+            WaitAndContinue("Слово не найдено");
+            return;
+        }
+
+        if (currentWords[word].Count <= 1)
+        {
+            WaitAndContinue("Нельзя удалить последний перевод");
+            return;
+        }
+
+        Console.Write("Какой перевод удалить? ");
+        string trans = Console.ReadLine() ?? "";
+
+        if (currentWords[word].Remove(trans))
+        {
+            SaveCurrentDictionary();
+            Console.WriteLine("Перевод удалён");
+        }
+        else
+        {
+            Console.WriteLine("Перевод не найден");
+        }
+        WaitAndContinue();
+    }
+
+    static void FindWord()
+    {
+        Console.Clear();
+        Console.Write("Слово для поиска: ");
+        string word = Console.ReadLine() ?? "";
+
+        if (currentWords.TryGetValue(word, out var translations))
+        {
+            Console.WriteLine($"\nПеревод(ы) '{word}':");
+            foreach (string t in translations)
+                Console.WriteLine($"  - {t}");
+        }
+        else
+        {
+            Console.WriteLine("Слово не найдено");
+        }
+        WaitAndContinue();
+    }
+
+    static void ExportWord()
+    {
+        Console.Clear();
+        Console.Write("Какое слово экспортировать? ");
+        string word = Console.ReadLine() ?? "";
+
+        if (!currentWords.ContainsKey(word))
+        {
+            WaitAndContinue("Слово не найдено");
+            return;
+        }
+
+        Console.Write("Имя файла (например, result.txt): ");
+        string fileName = Console.ReadLine() ?? "";
+        string fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+
+        using (StreamWriter writer = new StreamWriter(fullPath))
+        {
+            writer.WriteLine($"Словарь: {currentDictName} ({currentDictType})");
+            writer.WriteLine($"Слово: {word}");
+            writer.WriteLine("Переводы:");
+            for (int i = 0; i < currentWords[word].Count; i++)
+                writer.WriteLine($"  {i + 1}. {currentWords[word][i]}");
+        }
+
+        Console.WriteLine($"Экспортировано в {fullPath}");
+        WaitAndContinue();
+    }
+
+    //ВСПОМОГАТЕЛЬНЫЕ
+
+    static void WaitAndContinue(string message = "")
+    {
+        if (!string.IsNullOrEmpty(message))
+            Console.WriteLine($"\n{message}");
+        Console.WriteLine("\nНажмите Enter...");
+        Console.ReadLine();
+    }
+}
+
+// Класс для сериализации
+class DictionaryData
+{
+    public string Type { get; set; } = "";
+    public Dictionary<string, List<string>> Words { get; set; } = new();
+}
